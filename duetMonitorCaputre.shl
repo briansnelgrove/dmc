@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# duetMonitorCapture.shl
+# - monitor a duet powered printers status
+# - send push notifications to Andoid devices using notify when prints complete
+# - capture images from a mjpeg source
+# - conver the still images to a video using ffmpeg when prints are complete
+#
+# v0.01
+# initial release
+#
+# notes:
+#  I am a PHP guy not a shell scripting guy. The ; at the end of lines is no needed but I am used them.
+#  the system must have jq, curl, ffmpeg, nofity and wget installed for this to run!
+
+
+# Define these variables to match your use
+PRINTER=http://192.168.1.143;           # printer dns name or ip address
+TAKE_SNAPSHOTS=true;                    # take snapshots - true/false
+SNAPSHOT_DIRECTORY=./snapshots/;        # directory to hold snapshots
+LAYER_CHANGE=true;                      # take snapshots on layer change - true - on layer change, false - on time interval
+QUERY_INTERVAL=5;                       # query interval (seconds)
+MJPEG_SOURCE=octopi.local;              # in case we are not hosing the mjpeg streamer locally
+VIDEO_FRAMERATE=.2                      # how long each snapshot will show in the completed video
+
+
+# these variables are set by the script and do not need to be modifiec, default them to empty strings
+FILE='';
+STATUS='';
+PREVIOUS_STATUS='';
+CURRENT_STATUS='';
+CURRENT_STATUS_DESCRIPTION='';
+PREVIOUS_LAYER='';
+CURRENT_LAYER='';
+TIME_STAMP='';
+
+# make sure the snapshot directory exists
+if [ ! -d "$SNAPSHOT_DIRECTORY" ]; then
+ mkdir "$SNAPSHOT_DIRECTORY";
+fi
+
+# get the initial status of the printer
+# this gets all of the needed information in JSON format, use jq later to get the key/values we want later
+STATUS=$(curl -s $PRINTER/rr_status?type=2);
+# get the printers status
+PREVIOUS_STATUS=$(echo "$STATUS" | jq -r '.status');
+
+# if we are printing grab the file name
+if [ "$PREVIOUS_STATUS" = 'P' ] ; then
+ # get the starting layer - there is probably a better way but stacking these commands works
+ PREVIOUS_LAYER=$(echo "$STATUS" | jq -r '.coords.xyz[]' | tail -1);  
+ # grab the filename while we are at it
+ FILE=$(curl -s $PRINTER/rr_fileinfo?type=1 | jq -r '.fileName' | cut -d. -f1);
+fi
+
+# start our infinite loop
+while [ 1 ]; do
+ # get our current timestamp
+ TIME_STAMP=$(date '+%Y%m%d%H%M%S');
+ # grab the printer status
+ STATUS=$(curl -s $PRINTER/rr_status?type=2);
+ # extract the current status
+ CURRENT_STATUS=$(echo "$STATUS" | jq -r '.status');
+ # extract the current layer
+ CURRENT_LAYER=$(echo "$STATUS" | jq -r '.coords.xyz[]' | tail -1);
+ # figure out what the current status means
+ case "$CURRENT_STATUS" in
+  'P') CURRENT_STATUS_DESCRIPTION='Printing';;
+  'F') CURRENT_STATUS_DESCRIPTION='Flashing Firmware';;
+  'H') CURRENT_STATUS_DESCRIPTION='Halted';;
+  'D') CURRENT_STATUS_DESCRIPTION='Pausing/Decelerating';;
+  'S') CURRENT_STATUS_DESCRIPTION='Paused/Stopped';;
+  'R') CURRENT_STATUS_DESCRIPTION='Resuming';;
+  'M') CURRENT_STATUS_DESCRIPTION='Simulating';;
+  'B') CURRENT_STATUS_DESCRIPTION='Busy';;
+  'T') CURRENT_STATUS_DESCRIPTION='Changing Tool';;
+  'I') CURRENT_STATUS_DESCRIPTION='Idle';;
+ esac
+  echo "Currently $CURRENT_STATUS_DESCRIPTION '$FILE' at $CURRENT_LAYER Z height";
+ # see if the current status is the same as the previous status
+ if [ "$CURRENT_STATUS" != "$PREVIOUS_STATUS" ]; then
+  # if we have changed status and we are printing
+  if [ "$CURRENT_STATUS" = 'P' ]; then
+   # make sure we have the most recent print name
+   FILE=$(curl -s $PRINTER/rr_fileinfo?type=1 | jq -r '.fileName' | cut -d. -f1);
+  fi
+  # if the current status is idle and the previous status was printing we just finished a print
+  if [ "$CURRENT_STATUS" == 'I' ] && [ "$PREVIOUS_STATUS" == 'P' ]; then
+   # let the user know!
+   notify -t "$CURRENT_STATUS_DESCRIPTION $FILE" >> /dev/null
+   # make sure we have some snapshots
+   FILE_COUNT=$(ls -1 "$SNAPSHOT_DIRECTORY" | wc -l);
+   if [ ! "$FILE_COUNT" = '0' ]; then
+    # probalby a better way to do this but...
+    # move into the snapshots directory
+    cd "$SNAPSHOT_DIRECTORY";
+    # rename all of the files with WAY too many 0's for padding
+    ls *.jpeg | cat -n | while read i f; do mv "$f" `printf "image-%015d.jpeg" "$i"`; done
+    # convert the file to a video
+    ffmpeg -r 1/"$VIDEO_FRAMERATE" -i image-%015d.jpeg -c:v libx264 -vf fps=25 -pix_fmt yuv420p "$FILE.mp4";
+    # remove the image files when we are done
+    /bin/rm image-*.jpeg;
+    # jump up one directory so we get back to were we started
+    cd ..;
+   fi
+  fi
+ fi
+ # see if we are taking snapshots and make sure we are printing
+ if [ "$TAKE_SNAPSHOTS" = 'true' ] && [ "$CURRENT_STATUS" = 'P' ]; then
+  # see if it is time to take a snapshot
+  if [ "$LAYER_CHANGE" != 'true' ] || [ "$CURRENT_LAYER" != "$PREVIOUS_LAYER" ]; then
+   # grab a snapshot
+   wget "http://$MJPEG_SOURCE:8080/?action=snapshot" -O "$SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg" &> /dev/null;
+   # update the layer
+   PREVIOUS_LAYER="$CURRENT_LAYER";
+  fi
+ fi
+ # sleep for a bit, we all need a good nap from time to time
+ sleep "$QUERY_INTERVAL";
+ # update the previous status to the current status before we loop again
+ PREVIOUS_STATUS="$CURRENT_STATUS";
+done
