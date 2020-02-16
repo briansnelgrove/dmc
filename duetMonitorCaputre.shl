@@ -15,7 +15,7 @@
 
 
 # Define these variables to match your use
-PRINTER=http://192.168.1.143;           # printer dns name or ip address
+PRINTER=http://192.168.1.143;           # printer dns name or ip address 
 TAKE_SNAPSHOTS=true;                    # take snapshots - true/false
 SNAPSHOT_DIRECTORY=./snapshots/;        # directory to hold snapshots
 LAYER_CHANGE=true;                      # take snapshots on layer change - true - on layer change, false - on time interval
