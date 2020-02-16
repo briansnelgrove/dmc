@@ -2,3 +2,4 @@
 # DuetMonitorCapture.config.dist should be updated and renamed DuetMonitorCapture.config
 # so updates are not overwritten or published during a git clone or git push
 DuetMonitorCapture.config
+snapshots
