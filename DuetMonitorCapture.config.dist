@@ -1,0 +1,11 @@
+# DuetMonitorCapture.config.dist
+# This file should be renamed DuetMontiorCapture.config so it will not be
+# overwritten during a clone
+# Define these variables to match your use
+PRINTER=http://DuetPrinter.local;       # printer hostname or ip address 
+TAKE_SNAPSHOTS=true;                    # take snapshots - true/false
+SNAPSHOT_DIRECTORY=./snapshots/;        # directory to hold snapshots
+LAYER_CHANGE=true;                      # take snapshots on layer change - true - on layer change, false - on time interval
+QUERY_INTERVAL=5;                       # query interval (seconds)
+MJPEG_SOURCE=webcam.server;             # webcam server hostname or ip address
+VIDEO_FRAMERATE=.2                      # how long each snapshot will show in the completed video
