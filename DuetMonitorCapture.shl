@@ -1,32 +1,37 @@
 #!/bin/bash
 
-# duetMonitorCapture.shl
-# - monitor a duet powered printers status
-# - send push notifications to Andoid devices using notify when prints complete
+# DuetMonitorCapture.shl
+# - monitor a duet (reprap) powered 3d printer status
 # - capture images from a mjpeg source
-# - conver the still images to a video using ffmpeg when prints are complete
+# - convert the still images to a video using ffmpeg as prints complete
+#
+# I personally use a Raspberry Pi with a webcam and mjpg_streamer as the video source
+# but any network accessible mjpeg source would work - security cameras, desktop computers, etc.
 #
 #
 # v0.02
-#  update to use external configuration file
+#  external configuration file
+#  logic to verify needed software is installed
+#  logic to verify mjpeg source is available
+#  removed prerequisite for notify
+#   notify was only useful for people with android phones that wanted notifications when prints completed
+#  removed prerequisite for wget
+#   wget was a little redundant, curl will work and removes the additional software requirement
 #
 # v0.01
 #  initial release
 #
 # notes:
-#  the system must have jq, curl, ffmpeg, nofity and wget installed for this to run!
-#  nohup /usr/local/bin/mjpg_streamer -i "/usr/local/lib/input_uvc.so -d /dev/video0 -r 1280x720" -o "/usr/local/lib/output_http.so -w /usr/local/www" &> mjpg_streamer.out&
+#  the system must have jq, curl, and ffmpeg installed for this to run!
 
 # verify dependnecies are installed
-command -v curl >/dev/null 2>&1 || { echo >&2 "This program requires cURL but it's not installed. To install try: 'sudo apt install curl' on Debian based systems."; return 1; }
-command -v jq >/dev/null 2>&1 || { echo >&2 "This program requires jq but it's not installed. To install try: 'sudo apt install jq' on Debian based systems."; return 1; }
-command -v ffmpeg >/dev/null 2>&1 || { echo >&2 "This program requires ffmpeg but it's not installed. To install try: 'sudo apt install ffmpeg' on Debian based systems."; return 1; }
-command -v notify >/dev/null 2>&1 || { echo >&2 "This program requires notify but it's not installed. To install try: 'sudo apt install notify' on Debian based systems."; return 1; }
-command -v curl >/dev/null 2>&1 || { echo >&2 "This program requires cURL but it's not installed. To install try: 'sudo apt install curl' on Debian based systems."; return 1; }
-command -v wget >/dev/null 2>&1 || { echo >&2 "This program requires wget but it's not installed. To install try: 'sudo apt install wget' on Debian based systems."; return 1; }
+command -v curl >/dev/null 2>&1 || { echo >&2 "This program requires curl to access mjpeg stream but it is not installed. To install try: 'sudo apt install curl' on Debian based systems."; return 1; }
+command -v jq >/dev/null 2>&1 || { echo >&2 "This program requires jq to parse JSON output from printer but it is not installed. To install try: 'sudo apt install jq' on Debian based systems."; return 1; }
+command -v ffmpeg >/dev/null 2>&1 || { echo >&2 "This program requires ffmpeg to convert still images to a video but it is not installed. To install try: 'sudo apt install ffmpeg' on Debian based systems."; return 1; }
 
 # get the current working directory
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )";
+echo "$DIR is the current working directory.";
 
 # see if the production config file exists, if not try falling back to the dist file
 FILE="$DIR/DuetMonitorCapture.config";
@@ -45,26 +50,31 @@ else
 fi
 
 # quick variables to check output of webcam
-RESPONSE=response.txt;
-HEADERS=headers.txt;
+RESPONSE="response.txt";
+HEADERS="headers.txt";
 # curl the webcam source
-curl -s -D $HEADERS "http://$MJPEG_SOURCE:8080/?action=snapshot" -o $RESPONSE;
+curl -s -D $HEADERS "$MJPEG_SOURCE" -o $RESPONSE;
 # grab the status - should be 200 if things are working correctly
 STATUS=$(cat $HEADERS | head -n 1 | awk '{print $2}');
 
-if [[ $STATUS != '200' ]]; then
+# see if a HTTP response of 200 was returned
+if [[ $STATUS != "200" ]]; then
+ # remove the response and header text files
  rm $RESPONSE;
  rm $HEADERS;
- echo "There was a problem connecting to the video stream @ http://$MJPEG_SOURCE:8080/?action=snapshot !";
+ # alert the user that the video stream is not available
+ echo "There was a problem connecting to the video stream @ $MJPEG_SOURCE !";
  echo "Please check make sure the stream is available before started DuetMonitorCapture";
  return;
 else
- echo "Connection to video stream successful @ http://$MJPEG_SOURCE:8080/?action=snapshot - continuing.";
+ # remove the response and header text files
  rm $RESPONSE;
  rm $HEADERS;
+ # provide feedback that the video stream is availalbe
+ echo "Connection to video stream successful @ $MJPEG_SOURCE - continuing.";
 fi
 
-# these variables are set by the script and do not need to be modifiec, default them to empty strings
+# these variables are set by the script and do not need to be modified, default them to empty strings
 FILE='';
 STATUS='';
 PREVIOUS_STATUS='';
@@ -84,21 +94,20 @@ if [ ! -d "$SNAPSHOT_DIRECTORY" ]; then
  return;
 fi
 
-# get the initial status of the printer
-# this gets all of the needed information in JSON format, use jq later to get the key/values we want later
+# get the initial status of the printer - returned in JSON format
 STATUS=$(curl -s $PRINTER/rr_status?type=2);
-# get the printers status
+# parse the JSON to get the printer status
 PREVIOUS_STATUS=$(echo "$STATUS" | jq -r '.status');
 
 # if we are printing grab the file name
 if [ "$PREVIOUS_STATUS" = 'P' ] ; then
  # get the starting layer - there is probably a better way but stacking these commands works
  PREVIOUS_LAYER=$(echo "$STATUS" | jq -r '.coords.xyz[]' | tail -1);  
- # grab the filename while we are at it
+ # grab the filename while we are at it - again, probably a better way but stacking commands works
  FILE=$(curl -s $PRINTER/rr_fileinfo?type=1 | jq -r '.fileName' | cut -d. -f1);
 fi
 
-# start our infinite loop
+# start our loop
 while [ 1 ]; do
  # get our current timestamp
  TIME_STAMP=$(date '+%Y%m%d%H%M%S');
@@ -121,7 +130,8 @@ while [ 1 ]; do
   'T') CURRENT_STATUS_DESCRIPTION='Changing Tool';;
   'I') CURRENT_STATUS_DESCRIPTION='Idle';;
  esac
-  echo "Currently $CURRENT_STATUS_DESCRIPTION '$FILE' at $CURRENT_LAYER Z height";
+ # provide status feedback
+ echo "Currently $CURRENT_STATUS_DESCRIPTION '$FILE' at $CURRENT_LAYER Z height";
  # see if the current status is the same as the previous status
  if [ "$CURRENT_STATUS" != "$PREVIOUS_STATUS" ]; then
   # if we have changed status and we are printing
@@ -131,8 +141,6 @@ while [ 1 ]; do
   fi
   # if the current status is idle and the previous status was printing we just finished a print
   if [ "$CURRENT_STATUS" == 'I' ] && [ "$PREVIOUS_STATUS" == 'P' ]; then
-   # let the user know!
-   notify -t "$CURRENT_STATUS_DESCRIPTION $FILE" >> /dev/null
    # make sure we have some snapshots
    FILE_COUNT=$(ls -1 "$SNAPSHOT_DIRECTORY" | wc -l);
    if [ ! "$FILE_COUNT" = '0' ]; then
@@ -154,8 +162,9 @@ while [ 1 ]; do
  if [ "$TAKE_SNAPSHOTS" = 'true' ] && [ "$CURRENT_STATUS" = 'P' ]; then
   # see if it is time to take a snapshot
   if [ "$LAYER_CHANGE" != 'true' ] || [ "$CURRENT_LAYER" != "$PREVIOUS_LAYER" ]; then
+   echo "Taking snapshot - $SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg";
    # grab a snapshot
-   wget "http://$MJPEG_SOURCE:8080/?action=snapshot" -O "$SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg" &> /dev/null;
+   curl -s "http://$MJPEG_SOURCE:8080/?action=snapshot" -o "$SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg";
    # update the layer
    PREVIOUS_LAYER="$CURRENT_LAYER";
   fi
