@@ -58,7 +58,7 @@ curl -s -D $HEADERS "$MJPEG_SOURCE" -o $RESPONSE;
 STATUS=$(cat $HEADERS | head -n 1 | awk '{print $2}');
 
 # see if a HTTP response of 200 was returned
-if [[ $STATUS != "200" ]]; then
+if [ $STATUS != "200" ]; then
  # remove the response and header text files
  rm $RESPONSE;
  rm $HEADERS;
@@ -140,7 +140,7 @@ while [ 1 ]; do
    FILE=$(curl -s $PRINTER/rr_fileinfo?type=1 | jq -r '.fileName' | cut -d. -f1);
   fi
   # if the current status is idle and the previous status was printing we just finished a print
-  if [ "$CURRENT_STATUS" == 'I' ] && [ "$PREVIOUS_STATUS" == 'P' ]; then
+  if [ "$CURRENT_STATUS" = 'I' ] && [ "$PREVIOUS_STATUS" = 'P' ]; then
    # make sure we have some snapshots
    FILE_COUNT=$(ls -1 "$SNAPSHOT_DIRECTORY" | wc -l);
    if [ ! "$FILE_COUNT" = '0' ]; then
