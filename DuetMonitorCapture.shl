@@ -166,7 +166,7 @@ while [ 1 ]; do
   if [ "$LAYER_CHANGE" != 'true' ] || [ "$CURRENT_LAYER" != "$PREVIOUS_LAYER" ]; then
    echo "Taking snapshot - $SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg";
    # grab a snapshot
-   curl -s "http://$MJPEG_SOURCE:8080/?action=snapshot" -o "$SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg";
+   curl -s "$MJPEG_SOURCE:8080/?action=snapshot" -o "$SNAPSHOT_DIRECTORY/$FILE$TIME_STAMP.jpeg";
    # update the layer
    PREVIOUS_LAYER="$CURRENT_LAYER";
   fi
