@@ -84,6 +84,8 @@ PREVIOUS_LAYER='';
 CURRENT_LAYER='';
 TIME_STAMP='';
 
+$SNAPSHOT_DIRECTORY="$DIR/$SNAPSHOT_DIRECTORY";
+
 # make sure the snapshot directory exists
 if [ ! -d "$SNAPSHOT_DIRECTORY" ]; then
  echo "$SNAPSHOT_DIRECTORY does not exist, attempting to create it.";
